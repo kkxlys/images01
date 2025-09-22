@@ -27,10 +27,12 @@ export default function AIGeneratePage() {
   ];
 
   const sizes = [
-    { value: "512x512", label: "正方形 (512×512)" },
-    { value: "768x512", label: "横向 (768×512)" },
-    { value: "512x768", label: "纵向 (512×768)" },
-    { value: "1024x1024", label: "高清正方形 (1024×1024)" }
+    { value: "512x512", label: "标准正方形 (实际输出1K分辨率)" },
+    { value: "768x512", label: "标准横向 (实际输出1K分辨率)" },
+    { value: "512x768", label: "标准纵向 (实际输出1K分辨率)" },
+    { value: "1024x1024", label: "高清正方形 (2K分辨率)" },
+    { value: "1024x768", label: "高清横向 (1024×768)" },
+    { value: "768x1024", label: "高清纵向 (768×1024)" }
   ];
 
   const generateImage = async () => {
@@ -38,24 +40,41 @@ export default function AIGeneratePage() {
 
     setLoading(true);
     try {
-      // 模拟AI生图过程（实际项目中需要调用AI生图API）
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // 调用火山引擎AI生图API
+      const response = await fetch('/api/ai-generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          style: style,
+          size: size
+        }),
+      });
 
-      // 生成模拟图片（使用占位图服务）
-      const [width, height] = size.split('x').map(Number);
-      const mockImageUrl = `https://picsum.photos/${width}/${height}?random=${Date.now()}`;
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || '生图失败');
+      }
+
+      if (!result.success || !result.imageUrl) {
+        throw new Error('API返回数据格式错误');
+      }
 
       const newImage: GeneratedImage = {
-        url: mockImageUrl,
-        prompt: prompt,
+        url: result.imageUrl,
+        prompt: result.originalPrompt || prompt,
         style: style,
         timestamp: new Date()
       };
 
       setGeneratedImages(prev => [newImage, ...prev]);
-      setLoading(false);
     } catch (error) {
       console.error('生图失败:', error);
+      alert(`生图失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
       setLoading(false);
     }
   };
