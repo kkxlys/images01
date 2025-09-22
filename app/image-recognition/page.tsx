@@ -4,14 +4,18 @@ import { useState, useRef } from "react";
 import Link from "next/link";
 
 interface RecognitionResult {
-  category: string;
-  confidence: number;
-  description: string;
+  content: string;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }
 
 export default function ImageRecognitionPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [results, setResults] = useState<RecognitionResult[]>([]);
+  const [result, setResult] = useState<RecognitionResult | null>(null);
+  const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -19,7 +23,8 @@ export default function ImageRecognitionPage() {
     const file = event.target.files?.[0];
     if (file && file.type.startsWith('image/')) {
       setSelectedFile(file);
-      setResults([]);
+      setResult(null);
+      setError('');
     }
   };
 
@@ -28,7 +33,8 @@ export default function ImageRecognitionPage() {
     const file = event.dataTransfer.files[0];
     if (file && file.type.startsWith('image/')) {
       setSelectedFile(file);
-      setResults([]);
+      setResult(null);
+      setError('');
     }
   };
 
@@ -40,61 +46,58 @@ export default function ImageRecognitionPage() {
     if (!selectedFile) return;
 
     setLoading(true);
+    setError('');
+
     try {
-      // 模拟AI识别结果（实际项目中需要调用AI服务API）
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // 将文件转换为base64
+      const base64String = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          // 移除data:image/...;base64,前缀，只保留base64数据
+          const base64Data = result.split(',')[1];
+          resolve(base64Data);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(selectedFile);
+      });
 
-      // 模拟识别结果
-      const mockResults: RecognitionResult[] = [
-        {
-          category: "物体识别",
-          confidence: 0.95,
-          description: "图片中包含人物、建筑物等主要元素"
+      // 调用后端API
+      const response = await fetch('/api/image-recognition', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        {
-          category: "场景分析",
-          confidence: 0.88,
-          description: "这是一张户外风景照片，光线良好"
-        },
-        {
-          category: "颜色分析",
-          confidence: 0.92,
-          description: "主要颜色为蓝色、绿色和白色，色彩饱和度较高"
-        },
-        {
-          category: "构图分析",
-          confidence: 0.85,
-          description: "采用三分法构图，视觉焦点突出"
-        }
-      ];
+        body: JSON.stringify({
+          imageData: base64String,
+          prompt: "请详细分析这张图片的内容，包括主要物体、场景、颜色、构图等方面。"
+        }),
+      });
 
-      setResults(mockResults);
-      setLoading(false);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || '识别失败');
+      }
+
+      setResult(data);
     } catch (error) {
       console.error('识别失败:', error);
+      setError(error instanceof Error ? error.message : '识别失败，请重试');
+    } finally {
       setLoading(false);
     }
   };
 
   const resetAll = () => {
     setSelectedFile(null);
-    setResults([]);
+    setResult(null);
+    setError('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
 
-  const getConfidenceColor = (confidence: number) => {
-    if (confidence >= 0.9) return "text-green-600 dark:text-green-400";
-    if (confidence >= 0.7) return "text-yellow-600 dark:text-yellow-400";
-    return "text-red-600 dark:text-red-400";
-  };
-
-  const getConfidenceLabel = (confidence: number) => {
-    if (confidence >= 0.9) return "高置信度";
-    if (confidence >= 0.7) return "中等置信度";
-    return "低置信度";
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-purple-100 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
@@ -173,28 +176,27 @@ export default function ImageRecognitionPage() {
                           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
                           <p className="text-gray-600 dark:text-gray-400">AI正在分析中...</p>
                         </div>
-                      ) : results.length > 0 ? (
-                        results.map((result, index) => (
-                          <div key={index} className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
-                            <div className="flex justify-between items-start mb-2">
-                              <h4 className="font-semibold text-gray-900 dark:text-white">
-                                {result.category}
-                              </h4>
-                              <span className={`text-sm font-medium ${getConfidenceColor(result.confidence)}`}>
-                                {getConfidenceLabel(result.confidence)} ({(result.confidence * 100).toFixed(1)}%)
-                              </span>
-                            </div>
-                            <p className="text-gray-600 dark:text-gray-300 text-sm">
-                              {result.description}
-                            </p>
-                            <div className="mt-2 w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
-                              <div
-                                className="bg-purple-600 h-2 rounded-full transition-all duration-300"
-                                style={{ width: `${result.confidence * 100}%` }}
-                              ></div>
-                            </div>
+                      ) : error ? (
+                        <div className="border border-red-200 dark:border-red-600 bg-red-50 dark:bg-red-900/20 rounded-lg p-4">
+                          <h4 className="font-semibold text-red-800 dark:text-red-400 mb-2">识别失败</h4>
+                          <p className="text-red-600 dark:text-red-300 text-sm">{error}</p>
+                        </div>
+                      ) : result ? (
+                        <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
+                          <h4 className="font-semibold text-gray-900 dark:text-white mb-3">AI分析结果</h4>
+                          <div className="prose prose-sm max-w-none text-gray-600 dark:text-gray-300">
+                            <p className="whitespace-pre-wrap">{result.content}</p>
                           </div>
-                        ))
+                          {result.usage && (
+                            <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-600">
+                              <div className="text-xs text-gray-500 dark:text-gray-400 space-x-4">
+                                <span>消耗Token: {result.usage.total_tokens}</span>
+                                <span>输入: {result.usage.prompt_tokens}</span>
+                                <span>输出: {result.usage.completion_tokens}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       ) : (
                         <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                           点击"开始识别"按钮分析图片
