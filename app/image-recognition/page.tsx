@@ -22,9 +22,7 @@ export default function ImageRecognitionPage() {
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file && file.type.startsWith('image/')) {
-      setSelectedFile(file);
-      setResult(null);
-      setError('');
+      processFile(file);
     }
   };
 
@@ -32,14 +30,105 @@ export default function ImageRecognitionPage() {
     event.preventDefault();
     const file = event.dataTransfer.files[0];
     if (file && file.type.startsWith('image/')) {
-      setSelectedFile(file);
-      setResult(null);
-      setError('');
+      processFile(file);
     }
   };
 
   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
+  };
+
+  const compressImage = (file: File, maxSize: number = 3): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+
+      img.onload = () => {
+        const maxDimension = 1920;
+        let { width, height } = img;
+
+        if (width > height) {
+          if (width > maxDimension) {
+            height = (height * maxDimension) / width;
+            width = maxDimension;
+          }
+        } else {
+          if (height > maxDimension) {
+            width = (width * maxDimension) / height;
+            height = maxDimension;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        let quality = 0.8;
+        const compress = () => {
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                const compressedFile = new File([blob], file.name, {
+                  type: 'image/jpeg',
+                  lastModified: Date.now(),
+                });
+
+                const sizeInMB = compressedFile.size / (1024 * 1024);
+
+                if (sizeInMB <= maxSize || quality <= 0.1) {
+                  resolve(compressedFile);
+                } else {
+                  quality -= 0.1;
+                  compress();
+                }
+              } else {
+                reject(new Error('压缩失败'));
+              }
+            },
+            'image/jpeg',
+            quality
+          );
+        };
+
+        compress();
+      };
+
+      img.onerror = () => reject(new Error('图片加载失败'));
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
+  const processFile = async (file: File) => {
+    setResult(null);
+    setError('');
+    setLoading(true);
+
+    try {
+      const maxSizeMB = 3;
+      const fileSizeMB = file.size / (1024 * 1024);
+
+      let processedFile = file;
+
+      if (fileSizeMB > maxSizeMB) {
+        setError(`正在压缩图片（原大小: ${fileSizeMB.toFixed(1)}MB）...`);
+        processedFile = await compressImage(file, maxSizeMB);
+        setError('');
+      }
+
+      const finalSizeMB = processedFile.size / (1024 * 1024);
+      if (finalSizeMB > maxSizeMB) {
+        throw new Error(`图片过大（${finalSizeMB.toFixed(1)}MB），请选择更小的图片或降低图片质量`);
+      }
+
+      setSelectedFile(processedFile);
+    } catch (error) {
+      console.error('文件处理失败:', error);
+      setError(error instanceof Error ? error.message : '文件处理失败');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const recognizeImage = async () => {
@@ -141,7 +230,7 @@ export default function ImageRecognitionPage() {
                   拖拽图片到这里或点击选择
                 </h3>
                 <p className="text-gray-500 dark:text-gray-400">
-                  支持 JPG、PNG、GIF 等格式
+                  支持 JPG、PNG、GIF 等格式，单张图片不超过 3MB
                 </p>
                 <input
                   ref={fileInputRef}
@@ -162,8 +251,10 @@ export default function ImageRecognitionPage() {
                         alt="待识别图片"
                         className="w-full h-auto max-h-64 object-contain"
                       />
-                      <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                        文件名: {selectedFile.name}
+                      <div className="mt-2 text-sm text-gray-500 dark:text-gray-400 space-y-1">
+                        <div>文件名: {selectedFile.name}</div>
+                        <div>大小: {(selectedFile.size / (1024 * 1024)).toFixed(2)}MB</div>
+                        <div>格式: {selectedFile.type}</div>
                       </div>
                     </div>
                   </div>
